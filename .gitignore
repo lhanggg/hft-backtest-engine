@@ -1,0 +1,25 @@
+# Build directories
+build/
+out/
+bin/
+lib/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dll
+*.exe
+
+# Logs and temp
+*.log
+*.tmp
+
+# VSCode (optional)
+.vscode/
