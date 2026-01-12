@@ -1,5 +1,7 @@
 #include "order_book.hpp"
 
+#include <iostream>
+
 OrderBook::OrderBook(int64_t min_price,
                      int64_t max_price,
                      size_t  max_orders)
@@ -259,22 +261,21 @@ void OrderBook::cancelOrder(const MarketUpdate& u) {
 }
 
 void OrderBook::applyUpdate(const MarketUpdate& u) {
+    if (u.price < _min_price || u.price > _max_price) {
+        // Ignore out-of-range prices for this simple benchmark
+        return;
+    }
+
+    if (u.order_id >= _max_orders) {
+        // Ignore absurd order_id for now
+        return;
+    }
+
     switch (u.type) {
-        case UpdateType::Add:
-            insertOrder(u);
-            break;
-
-        case UpdateType::Modify:
-            modifyOrder(u);
-            break;
-
-        case UpdateType::Cancel:
-            cancelOrder(u);
-            break;
-
-        default:
-            // ignore unknown types
-            break;
+        case UpdateType::Add:    insertOrder(u);   break;
+        case UpdateType::Modify: modifyOrder(u);   break;
+        case UpdateType::Cancel: cancelOrder(u);   break;
+        default: break;
     }
 }
 

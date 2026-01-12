@@ -1,11 +1,9 @@
 #include "engine/event_loop.hpp"
 
 #include "core/order_book.hpp"
-#include "util/timer.hpp"         
-#include "core/ring_buffer.hpp" 
+#include "core/ring_buffer.hpp"
+#include "util/timer.hpp"
 #include <iostream>
-
-// ---- EventLoop implementation ----
 
 EventLoop::EventLoop(MdQueue&      md_queue,
                      OutQueue&     out_queue,
@@ -20,42 +18,51 @@ EventLoop::EventLoop(MdQueue&      md_queue,
     , risk_(risk_manager)
     , timer_interval_ns_(timer_interval_ns)
 {
-    last_timer_ts_ns_ = get_monotonic_ns(); // from util/timer.hpp
+    last_timer_ts_ns_ = get_monotonic_ns();
 }
 
 void EventLoop::run() {
-    while (running_.load(std::memory_order_acquire)) {
+    while (true) {
+        bool did_work = false;
+
+        did_work |= handle_market_data();
+        did_work |= handle_strategy_output();
+
         const std::uint64_t now_ns = get_monotonic_ns();
-        handle_market_data();
-        handle_strategy_output();
         maybe_fire_timer(now_ns);
 
-        // If you want a pure busy-poll loop, leave this empty.
-        // Otherwise, you can add a tiny pause or backoff here for tests.
+        if (!did_work) {
+            break;
+        }
     }
 }
 
-void EventLoop::handle_market_data() {
+bool EventLoop::handle_market_data() {
+    bool did_work = false;
+
     MarketUpdate mu;
-    // Drain a batch of updates per iteration for throughput.
     while (md_queue_.pop(mu)) {
-        std::cout << "EventLoop got update: " << mu.price << "\n";
+        did_work = true;
+        ++updates_processed_;
         order_book_.applyUpdate(mu);
         strategy_.on_market_update(mu);
     }
+
+    return did_work;
 }
 
-void EventLoop::handle_strategy_output() {
+bool EventLoop::handle_strategy_output() {
+    bool did_work = false;
+
     StrategySignal sig;
-    // Strategy might have at most one pending signal at a time for Week 7.
     while (strategy_.poll_signal(sig)) {
-        std::cout << "EventLoop got strategy signal: " << sig.price << "\n";
+        did_work = true;
         if (risk_.check(sig)) {
-            // In a real engine this would be an outbound order queue.
-            // For the backtester, you can store these for later verification.
             out_queue_.push(sig);
         }
     }
+
+    return did_work;
 }
 
 void EventLoop::maybe_fire_timer(std::uint64_t now_ns) {
