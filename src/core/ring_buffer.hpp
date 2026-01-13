@@ -6,6 +6,7 @@
 #include <new>
 #include <cassert>
 #include <type_traits>
+#include <cstring>
 #include "market_data.hpp"
 
 template<typename T>
@@ -37,7 +38,7 @@ public:
         if(next_head - tail > _capacity) {
             return false; // Queue is full
         }
-        new (&_buffer[head & _mask]) T(item);
+        std::memcpy(&_buffer[head & _mask], &item, sizeof(T));
         _head.store(next_head, std::memory_order_release);
         return true;
     }
@@ -48,7 +49,7 @@ public:
         const size_t next = head + 1;
         const size_t tail = _tail.load(std::memory_order_acquire);
         if ((next - tail) > _capacity) return false; // full
-        new (&_buffer[head & _mask]) T(std::move(item));
+        std::memcpy(&_buffer[head & _mask], &item, sizeof(T));
         _head.store(next, std::memory_order_release);
         return true;
     }

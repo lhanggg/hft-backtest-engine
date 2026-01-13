@@ -1,161 +1,64 @@
-Project Design for HFT Backtesting Engine
-This document defines the architecture, data layouts, APIs, performance targets, and verification plan for the ultra‑low‑latency backtester. It is a practical blueprint you can implement end‑to‑end and use to produce reproducible benchmarks and resume‑grade results.
+# Project Design — Backtesting Engine (derived from code)
 
+This document summarizes architecture, data layouts, APIs, and operational notes inferred from the codebase.
 
-Goals and Performance Targets
-- Primary goal: event‑driven C++ backtester with an order book capable of sub‑30 ns best‑price queries and sub‑microsecond end‑to‑end processing for 1M+ market updates/sec.
-- Secondary goals: allocation‑free hot path, lock‑free data paths, NUMA‑aware threading, zero‑copy replay, deterministic replay, and reproducible profiling.
-- Measured metrics: P50, P95, P99 latencies for update→query; throughput (msgs/sec); CPU utilization; tail latency under load.
+## Goals
+- Ultra-low-latency event-driven backtester: target 1M+ updates/sec with sub-microsecond processing on the hot path.
+- Allocation-free hot paths, lock-free handoff, deterministic replay, and reproducible profiling.
 
+## High-level Architecture
+Feed ingest → Feed handler → SPSC ring buffers → Order book → Event loop → Strategy → Risk → Execution/logging.
 
-High Level Architecture
-- Feed Ingest → Ring Buffers → Order Book → Event Dispatcher → Strategy Engine → Risk/PnL → Execution Simulator / Logger.
-- Storage and Replay: append‑only binary tick logs; mmap replay tool for deterministic input.
-- Telemetry: lightweight histograms, rdtsc wrappers, perf/VTune traces, flamegraphs.
+Key components in the repo:
+- Producer / parser: [`BinaryParser::parse`](src/feed/binary_parser.cpp) and generator [`src/tools/generate_feed.cpp`](src/tools/generate_feed.cpp).
+- Replay/mmap ingestion: [`run_mmap_replay`](src/replay/mmap_replay.cpp) maps feed files and feeds the handler.
+- Feed handler: [`FeedHandler`](src/feed/feed_handler.hpp).
+- Ring buffers: [`SpscRing`](src/core/ring_buffer.hpp).
+- Market model: [`MarketUpdate`](src/core/market_data.hpp) and [`OrderBook`](src/core/order_book.hpp).
+- Engine: [`EventLoop`](src/engine/event_loop.cpp) and [`Strategy`/`DummyStrategy`](src/engine/strategy_example.cpp).
+- Risk: [`RiskManager`](src/risk/) (interface used by the engine).
 
-Module Designs and APIs
-Ring Buffer Module
-- Purpose: low‑latency handoff between producer and consumer threads.
-- Types: SPSC (single producer single consumer), MPSC (multiple producers single consumer) if needed.
-- API
-template<typename T>
-class SpscRing {
-public:
-  bool push(const T& item); // nonblocking, returns false if full
-  bool pop(T& out);         // nonblocking, returns false if empty
-  void reset();
-};
+## Data Layouts and Formats
+- Feed record: 32‑byte packed record in [`src/tools/generate_feed.cpp`](src/tools/generate_feed.cpp); replay uses mmap in [`src/replay/mmap_replay.cpp`](src/replay/mmap_replay.cpp).
+- In-memory event: [`MarketUpdate`](src/core/market_data.hpp) — small PODs passed via SPSC ring.
 
+## APIs
+- SPSC ring: push/pop non-blocking (power-of-two capacity) — see [`SpscRing`](src/core/ring_buffer.hpp).
+- FeedHandler: consumer registration and onUpdate callback — [`FeedHandler`](src/feed/feed_handler.hpp).
+- Strategy: callbacks `on_market_update`, `on_timer`, and optional `poll_signal` — see [`src/engine/strategy_example.cpp`](src/engine/strategy_example.cpp).
+- Event loop: pulls from MD queue, applies updates to [`OrderBook`](src/core/order_book.hpp), invokes strategy, and enforces risk checks — see [`EventLoop`](src/engine/event_loop.cpp).
 
-- Implementation notes: use std::atomic<uint64_t> head/tail with acquire/release semantics; power‑of‑two capacity; mask index; avoid ABA by using sequence numbers if required; align head/tail to cache lines.
-Memory Pool and Allocator
-- Purpose: eliminate heap allocations on hot path.
-- API
-class FixedPool {
-public:
-  void* allocate();
-  void deallocate(void* p);
-  void preallocate(size_t n);
-};
+## Replay and Zero-copy
+- Replay uses memory-mapped files to avoid copying; parser consumes bytes and returns consumed size (`parser.parse(ptr, end, u)`) — see [`src/replay/mmap_replay.cpp`](src/replay/mmap_replay.cpp) and [`src/feed/binary_parser.cpp`](src/feed/binary_parser.cpp).
 
+## Performance Notes
+- Hot path: applyUpdate → strategy callback → SPSC push; avoid locks and heap allocations.
+- Timers: monotonic ns via `util/timer.hpp`; event loop fires timers at configured interval (`timer_interval_ns`) — see [`src/engine/event_loop.cpp`](src/engine/event_loop.cpp).
+- Use power-of-two queue sizes (e.g., QUEUE_CAP = 1<<20 used in benchmarks).
 
-- Implementation notes: per‑thread pools, free lists stored in cache‑aligned nodes, use posix_memalign or aligned_alloc for 64‑byte alignment.
-Order Book
-- Purpose: maintain price levels and orders with O(1) best‑price queries and fast updates.
-- Data layout
-- Price level: fixed array or vector of buckets; each bucket contains head pointer to order list.
-- Order node: fixed‑size struct with order id, price, qty, next index; stored in preallocated array.
-- API
-class OrderBook {
-public:
-  void applyUpdate(const MarketUpdate& u); // insert/modify/cancel
-  bool getBestBid(PriceLevel& out);
-  bool getBestAsk(PriceLevel& out);
-  void snapshot(OrderBookSnapshot& s); // lockless snapshot if needed
-};
+## Testing & Benchmarks
+- Unit tests: [`tests/unit_order_book.cpp`](tests/unit_order_book.cpp), [`tests/unit_ring_buffer.cpp`](tests/unit_ring_buffer.cpp).
+- Benchmarks: [`benchmarks/feed_throughput.cpp`](benchmarks/feed_throughput.cpp) uses replay → feed handler → ring to exercise pipeline.
 
+## Build / Run
+- CMake + MinGW on Windows; build artifacts and compile commands under `build/` (see `build/compile_commands.json`).
+- Typical run: generate feed via `src/tools/generate_feed.cpp`, then run benchmark/replay executable to feed the pipeline.
 
-- Implementation notes: use arrays indexed by price tick or hash; minimize branching in matching; keep hot fields cache aligned; avoid dynamic memory in applyUpdate.
-Feed Handler and Binary Format
-- Binary tick format (fixed width)
-- uint64_t timestamp_ns; uint32_t msg_type; uint64_t order_id; int64_t price; int32_t qty; uint8_t side;
-- Feed handler API
-class FeedHandler {
-public:
-  void start(); // binds sockets, pins threads
-  void stop();
-  void registerConsumer(SpscRing<MarketUpdate>* ring);
-};
+## Operational & Validation
+- Pin threads, align buffers to cache lines, and measure via RDTS/CLOCK wrappers in [`util/timer.hpp`].
+- Regression: run replay with fixed seed files and validate order book invariants with unit tests.
 
+## Open considerations
+- Formalize RiskManager interface and consistent naming (`check` vs `checkAndApply` in design notes).
+- Decide single model for strategy output: push into ring vs poll_signal; `DummyStrategy` shows both models (`out_queue_.push` vs `poll_signal`).
 
-- Implementation notes: use recvmmsg batching; use mmap for replay files; parse with branch‑free code paths; align buffers to cache lines.
-Event Loop and Strategy Interface
-- Event loop: poll ring buffers, dispatch events to strategy threads via SPSC queues.
-- Strategy API
-class Strategy {
-public:
-  void onMarketUpdate(const MarketUpdate& u);
-  void onTimer(uint64_t now_ns);
-};
-
-
-- Implementation notes: pin strategy threads to cores; use per‑instrument affinity to reduce contention.
-Risk and P&L
-- Design: lock‑free counters for positions and P&L; atomic snapshots for checks.
-- API
-class RiskManager {
-public:
-  bool checkAndApply(const Order& o); // returns false if violates limits
-  double getPnl();
-};
-
-
-- Implementation notes: pad per‑instrument counters to avoid false sharing; enforce limits on hot path with atomic compare‑and‑swap.
-
-Data Layout Examples
-struct alignas(64) OrderNode {
-  uint64_t order_id;
-  int64_t price;
-  int32_t qty;
-  uint32_t next_index;
-  uint8_t side;
-  uint8_t padding[7];
-};
-struct MarketUpdate {
-  uint64_t ts_ns;
-  uint32_t type;
-  uint64_t order_id;
-  int64_t price;
-  int32_t qty;
-  uint8_t side;
-};
-
-
-- Guideline: align hot structs to 64 bytes; keep hot fields at the beginning; avoid pointers in hot arrays—use indices.
-
-Concurrency and NUMA Strategy
-- Thread model
-- 1 thread per NIC RX queue or replay reader (feed threads).
-- 1 thread per group of instruments (strategy threads) pinned to cores.
-- 1 thread for risk aggregation and logging.
-- NUMA
-- allocate memory on the same NUMA node as the thread that will access it (numa_alloc_onnode or mbind).
-- pin threads using sched_setaffinity.
-- Affinity policy
-- map instruments to threads deterministically; avoid cross‑socket sharing of hot data.
-
-Zero Copy and Kernel Bypass Plan
-- Replay: use mmap to map tick files and feed them into ring buffers without copying.
-- Live ingest: use recvmmsg with large buffers and batching; optionally prototype DPDK or VMA as a documented extension.
-- Syscall minimization: batch system calls and avoid per‑message syscalls on hot path.
-
-Profiling and Measurement
-- Timing primitives: rdtsc wrappers with calibration to ns; clock_gettime for wall time.
-- Tools: perf, Intel VTune, perf record/report, flamegraphs, perf stat for hardware counters.
-- Metrics to capture: P50/P95/P99 latencies, throughput, CPU cycles per message, branch misses, cache misses, context switches.
-- Benchmark harness: microbench for order book single‑threaded; integration bench for feed→orderbook→strategy.
-
-Testing and Validation
-- Unit tests: order book invariants, ring buffer correctness, memory pool behavior.
-- Stress tests: ASAN/TSAN builds for concurrency bugs; long‑running replay at target rates.
-- Deterministic replay: seed RNGs and use fixed tick files to reproduce results.
-- Regression CI: run microbenchmarks on CI hardware or a controlled runner; fail on latency regressions beyond thresholds.
-
-Reproducibility and Environment Notes
-- Hardware: list CPU model, core count, frequency, NIC model, RAM, NUMA topology.
-- Kernel: record kernel version and tuning (IRQ affinity, net.core.rmem_max, net.core.rmem_default, vm.swappiness, hugepages).
-- Build: use CMake with -O3 -march=native -flto for release; provide debug and perf builds.
-- Runbook: scripts to set CPU affinity, disable turbo boost if needed, set IRQ affinity, and run replay at target rates.
-
-Microbench Plan and Acceptance Criteria
-- Microbench 1 Order Book Single Thread
-- Goal: median query < 30 ns; P99 < 200 ns.
-- Method: prepopulate book, run 10M random queries, measure latencies.
-- Microbench 2 Feed Throughput
-- Goal: sustain 1M updates/sec end‑to‑end with sub‑microsecond processing.
-- Method: replay synthetic feed at target rate, measure throughput and tail latency.
-- Microbench 3 Concurrency
-- Goal: scale to 100+ instruments with <2x latency increase.
-- Method: run multi‑threaded replay with pinned threads and measure per‑instrument latency.
-- Acceptance: publish P50/P95/P99 numbers with hardware and kernel config; include perf flamegraphs showing hotspots.
-
+For locations referenced above, see:
+- [`src/core/ring_buffer.hpp`](src/core/ring_buffer.hpp) — SPSC ring
+- [`src/core/market_data.hpp`](src/core/market_data.hpp) — MarketUpdate
+- [`src/core/order_book.hpp`](src/core/order_book.hpp) — OrderBook
+- [`src/feed/binary_parser.cpp`](src/feed/binary_parser.cpp) — BinaryParser::parse
+- [`src/feed/feed_handler.hpp`](src/feed/feed_handler.hpp) — FeedHandler
+- [`src/replay/mmap_replay.cpp`](src/replay/mmap_replay.cpp) — run_mmap_replay
+- [`src/engine/event_loop.cpp`](src/engine/event_loop.cpp) — EventLoop
+- [`src/engine/strategy_example.cpp`](src/engine/strategy_example.cpp) — DummyStrategy example
+- [`src/tools/generate_feed.cpp`](src/tools/generate_feed.cpp) — feed generator

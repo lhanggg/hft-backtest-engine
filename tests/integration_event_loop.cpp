@@ -27,15 +27,11 @@ int main() {
                    /*timer_interval_ns*/ 100'000);
     FeedHandler feed_handler(md_queue);
 
-    std::cout << "before run_mmap_replay\n";
     run_mmap_replay(feed_handler, "sample_feed.bin");
-    std::cout << "after run_mmap_replay\n";
 
-    std::cout << "before loop.run\n";
     const std::uint64_t start_ns = get_monotonic_ns();
     loop.run();
     const std::uint64_t end_ns = get_monotonic_ns();
-    std::cout << "after loop.run\n";
 
     const double seconds = (end_ns - start_ns) / 1e9;
     const std::uint64_t updates = loop.updates_processed();
