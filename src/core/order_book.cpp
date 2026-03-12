@@ -28,6 +28,12 @@ OrderBook::OrderBook(int64_t min_price,
     }
 }
 
+OrderBook::~OrderBook() {
+    delete[] bids_;
+    delete[] asks_;
+    delete[] nodes_;
+}
+
 uint32_t OrderBook::allocNode() {
     if (free_head_ == OrderNode::INVALID_INDEX) {
         // out of memory 

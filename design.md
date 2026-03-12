@@ -79,7 +79,7 @@ Nodes are stored in a flat array (`nodes_[]`). A free-list (`free_head_`) provid
 
 - **SPSC ring:** `push`/`pop` non-blocking, power-of-two capacity — [`SpscRing`](src/core/ring_buffer.hpp).
 - **FeedHandler:** consumer registration and `onUpdate` callback — [`FeedHandler`](src/feed/feed_handler.hpp).
-- **OrderBook:** single entry point `applyUpdate(MarketUpdate)`; queries `getBestBid` / `getBestAsk` — [`OrderBook`](src/core/order_book.hpp).
+- **OrderBook:** single entry point `applyUpdate(MarketUpdate)`; queries `[[nodiscard]] getBestBid` / `getBestAsk` — [`OrderBook`](src/core/order_book.hpp). Non-copyable, non-movable (owns raw arrays).
 - **Strategy:** callbacks `on_market_update`, `on_timer`, optional `poll_signal` — [`src/engine/strategy_example.cpp`](src/engine/strategy_example.cpp).
 - **EventLoop:** pulls from MD queue → `OrderBook::applyUpdate` → strategy → risk — [`EventLoop`](src/engine/event_loop.cpp).
 
@@ -94,7 +94,7 @@ Replay uses memory-mapped files to avoid copying; parser consumes bytes and retu
 - Use power-of-two queue sizes (e.g., `QUEUE_CAP = 1<<20`).
 
 ## Testing & Benchmarks
-- Unit tests: [`tests/unit_order_book.cpp`](tests/unit_order_book.cpp), [`tests/unit_ring_buffer.cpp`](tests/unit_ring_buffer.cpp).
+- Unit tests: [`tests/unit_order_book.cpp`](tests/unit_order_book.cpp) (19 cases: bid/ask insert, best-price tracking, qty/price modify, head/middle/tail cancel, node recycling, edge cases), [`tests/unit_ring_buffer.cpp`](tests/unit_ring_buffer.cpp).
 - Integration test: [`tests/integration_event_loop.cpp`](tests/integration_event_loop.cpp).
 - Order book microbench: [`benchmarks/bench_order_book.cpp`](benchmarks/bench_order_book.cpp) — TSC-calibrated, 1M samples, p50/p99/p99.9/max. See README for latest numbers.
 - Feed throughput bench: [`benchmarks/feed_throughput.cpp`](benchmarks/feed_throughput.cpp) — exercises the full replay → feed handler → ring → order book pipeline.
@@ -114,4 +114,3 @@ build/bench_order_book.exe
 - `RiskManager` interface: standardize method name (`check` vs `checkAndApply`).
 - Port to Linux: swap `MapViewOfFile` → `mmap`, `SetThreadAffinityMask` → `sched_setaffinity`, add hugepage support (`MAP_HUGETLB`).
 - Add a non-trivial strategy signal (e.g., EMA mid-price or order-book imbalance ratio).
-- Add `~OrderBook()` destructor and delete copy/move constructors (Rule of Five).

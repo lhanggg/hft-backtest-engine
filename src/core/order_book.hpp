@@ -38,12 +38,19 @@ public:
               int64_t max_price,
               size_t   max_orders);
 
+    ~OrderBook();
+
+    OrderBook(const OrderBook&)            = delete;
+    OrderBook& operator=(const OrderBook&) = delete;
+    OrderBook(OrderBook&&)                 = delete;
+    OrderBook& operator=(OrderBook&&)      = delete;
+
     // main entry point
     void applyUpdate(const MarketUpdate& u);
 
     // queries
-    bool getBestBid(PriceLevel& out) const;
-    bool getBestAsk(PriceLevel& out) const;
+    [[nodiscard]] bool getBestBid(PriceLevel& out) const;
+    [[nodiscard]] bool getBestAsk(PriceLevel& out) const;
 
 private:
     // configuration
