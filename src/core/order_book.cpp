@@ -261,20 +261,19 @@ void OrderBook::cancelOrder(const MarketUpdate& u) {
 }
 
 void OrderBook::applyUpdate(const MarketUpdate& u) {
-    if (u.price < min_price_ || u.price > max_price_) {
-        // Ignore out-of-range prices for this simple benchmark
+    if (u.order_id >= max_orders_) return;
+
+    // Cancel uses node.price (not u.price), so skip the range check for it.
+    if (u.type == UpdateType::Cancel) {
+        cancelOrder(u);
         return;
     }
 
-    if (u.order_id >= max_orders_) {
-        // Ignore absurd order_id for now
-        return;
-    }
+    if (u.price < min_price_ || u.price > max_price_) return;
 
     switch (u.type) {
-        case UpdateType::Add:    insertOrder(u);   break;
-        case UpdateType::Modify: modifyOrder(u);   break;
-        case UpdateType::Cancel: cancelOrder(u);   break;
+        case UpdateType::Add:    insertOrder(u); break;
+        case UpdateType::Modify: modifyOrder(u); break;
         default: break;
     }
 }

@@ -1,154 +1,156 @@
 #include "../src/core/order_book.hpp"
 #include <x86intrin.h>
 #include <vector>
-#include <iostream>
 #include <algorithm>
+#include <cstdio>
+#include <chrono>
 
-inline uint64_t rdtsc() {
-    return __rdtsc();
+// ---------------------------------------------------------------------------
+// TSC calibration
+// Spin for ~100 ms and compare TSC ticks against wall clock.
+// Returns nanoseconds per TSC cycle.
+// ---------------------------------------------------------------------------
+static double calibrate_ns_per_cycle() {
+    using clk = std::chrono::steady_clock;
+
+    volatile uint64_t dummy = __rdtsc(); (void)dummy;  // serialize
+
+    auto     w0 = clk::now();
+    uint64_t t0 = __rdtsc();
+    while (std::chrono::duration_cast<std::chrono::milliseconds>(
+               clk::now() - w0).count() < 100) {}
+    uint64_t t1 = __rdtsc();
+    auto     w1 = clk::now();
+
+    double wall_ns = (double)std::chrono::duration_cast<
+                         std::chrono::nanoseconds>(w1 - w0).count();
+    return wall_ns / (double)(t1 - t0);
 }
 
-void bench_best_price() {
-    OrderBook ob(90, 110, 100000);
+// ---------------------------------------------------------------------------
+// Print sorted percentiles in nanoseconds
+// ---------------------------------------------------------------------------
+static void print_stats(const char* name,
+                        std::vector<uint64_t>& s,
+                        double ns_per_cyc)
+{
+    std::sort(s.begin(), s.end());
+    size_t n = s.size();
+    printf("%-18s  p50=%6.1f ns  p99=%7.1f ns  p99.9=%7.1f ns  max=%8.1f ns\n",
+           name,
+           s[n * 50  / 100 ] * ns_per_cyc,
+           s[n * 99  / 100 ] * ns_per_cyc,
+           s[n * 999 / 1000] * ns_per_cyc,
+           (double)s.back()  * ns_per_cyc);
+}
 
-    // preload some orders
-    for (int i = 0; i < 1000; ++i) {
+static constexpr size_t N      = 1'000'000;
+static constexpr size_t WARMUP =    50'000;
+
+// ---------------------------------------------------------------------------
+void bench_best_price(double ns) {
+    OrderBook ob(90, 110, 10'000);
+    for (int i = 0; i < 1'000; ++i)
         ob.applyUpdate({0, UpdateType::Add, (uint64_t)i, 100 + (i % 5), 10, OrderSide::Bid});
-    }
 
-    std::vector<uint64_t> samples;
-    samples.reserve(1'000'000);
+    PriceLevel pl;
+    for (size_t i = 0; i < WARMUP; ++i) ob.getBestBid(pl);   // i-cache warmup
 
-    for (int i = 0; i < 1'000'000; ++i) {
-        uint64_t t0 = rdtsc();
-
-        PriceLevel pl;
+    std::vector<uint64_t> samples(N);
+    for (size_t i = 0; i < N; ++i) {
+        uint64_t t0 = __rdtsc();
         ob.getBestBid(pl);
-
-        uint64_t t1 = rdtsc();
-        samples.push_back(t1 - t0);
+        uint64_t t1 = __rdtsc();
+        samples[i] = t1 - t0;
     }
-
-    std::sort(samples.begin(), samples.end());
-
-    std::cout << "BestBid P50: " << samples[samples.size()*0.50] << " cycles\n";
-    std::cout << "BestBid P95: " << samples[samples.size()*0.95] << " cycles\n";
-    std::cout << "BestBid P99: " << samples[samples.size()*0.99] << " cycles\n";
+    print_stats("getBestBid", samples, ns);
 }
 
-void bench_insert() {
-    OrderBook ob(90, 110, 2'000'000);
+// ---------------------------------------------------------------------------
+void bench_insert(double ns) {
+    OrderBook ob(90, 110, WARMUP + N + 10);
 
-    std::vector<uint64_t> samples;
-    samples.reserve(1'000'000);
-
-    for (int i = 0; i < 1'000'000; ++i) {
-        MarketUpdate u{0, UpdateType::Add, (uint64_t)i, 100 + (i % 10), 10, OrderSide::Bid};
-
-        uint64_t t0 = rdtsc();
-        ob.applyUpdate(u);
-        uint64_t t1 = rdtsc();
-
-        samples.push_back(t1 - t0);
-    }
-
-    std::sort(samples.begin(), samples.end());
-
-    std::cout << "Insert P50: " << samples[samples.size()*0.50] << " cycles\n";
-    std::cout << "Insert P95: " << samples[samples.size()*0.95] << " cycles\n";
-    std::cout << "Insert P99: " << samples[samples.size()*0.99] << " cycles\n";
-}
-
-void bench_modify_qty() {
-    OrderBook ob(90, 110, 2'000'000);
-
-    // preload orders
-    for (int i = 0; i < 1'000'000; ++i) {
+    // warmup: prime i-cache and branch predictor
+    for (size_t i = 0; i < WARMUP; ++i)
         ob.applyUpdate({0, UpdateType::Add, (uint64_t)i, 100 + (i % 10), 10, OrderSide::Bid});
-    }
 
-    std::vector<uint64_t> samples;
-    samples.reserve(1'000'000);
-
-    for (int i = 0; i < 1'000'000; ++i) {
-        MarketUpdate u{0, UpdateType::Modify, (uint64_t)i, 100 + (i % 10), 7, OrderSide::Bid};
-
-        uint64_t t0 = rdtsc();
+    std::vector<uint64_t> samples(N);
+    for (size_t i = 0; i < N; ++i) {
+        MarketUpdate u{0, UpdateType::Add, (uint64_t)(WARMUP + i),
+                       100 + (int64_t)(i % 10), 10, OrderSide::Bid};
+        uint64_t t0 = __rdtsc();
         ob.applyUpdate(u);
-        uint64_t t1 = rdtsc();
-
-        samples.push_back(t1 - t0);
+        uint64_t t1 = __rdtsc();
+        samples[i] = t1 - t0;
     }
-
-    std::sort(samples.begin(), samples.end());
-
-    std::cout << "ModifyQty P50: " << samples[samples.size()*0.50] << " cycles\n";
-    std::cout << "ModifyQty P95: " << samples[samples.size()*0.95] << " cycles\n";
-    std::cout << "ModifyQty P99: " << samples[samples.size()*0.99] << " cycles\n";
+    print_stats("insert", samples, ns);
 }
 
-void bench_modify_price() {
-    OrderBook ob(90, 110, 2'000'000);
+// ---------------------------------------------------------------------------
+void bench_modify_qty(double ns) {
+    OrderBook ob(90, 110, N + 10);
+    for (size_t i = 0; i < N; ++i)
+        ob.applyUpdate({0, UpdateType::Add, (uint64_t)i, 100 + (int64_t)(i % 10), 10, OrderSide::Bid});
 
-    // preload orders
-    for (int i = 0; i < 1'000'000; ++i) {
-        ob.applyUpdate({0, UpdateType::Add, (uint64_t)i, 100, 10, OrderSide::Bid});
-    }
+    // warmup: same-price modify (fast path)
+    for (size_t i = 0; i < WARMUP; ++i)
+        ob.applyUpdate({0, UpdateType::Modify, (uint64_t)(i % N),
+                        100 + (int64_t)(i % 10), 8, OrderSide::Bid});
 
-    std::vector<uint64_t> samples;
-    samples.reserve(1'000'000);
-
-    for (int i = 0; i < 1'000'000; ++i) {
-        MarketUpdate u{0, UpdateType::Modify, (uint64_t)i, 101, 10, OrderSide::Bid};
-
-        uint64_t t0 = rdtsc();
+    std::vector<uint64_t> samples(N);
+    for (size_t i = 0; i < N; ++i) {
+        MarketUpdate u{0, UpdateType::Modify, (uint64_t)i,
+                       100 + (int64_t)(i % 10), 6, OrderSide::Bid};
+        uint64_t t0 = __rdtsc();
         ob.applyUpdate(u);
-        uint64_t t1 = rdtsc();
-
-        samples.push_back(t1 - t0);
+        uint64_t t1 = __rdtsc();
+        samples[i] = t1 - t0;
     }
-
-    std::sort(samples.begin(), samples.end());
-
-    std::cout << "ModifyPrice P50: " << samples[samples.size()*0.50] << " cycles\n";
-    std::cout << "ModifyPrice P95: " << samples[samples.size()*0.95] << " cycles\n";
-    std::cout << "ModifyPrice P99: " << samples[samples.size()*0.99] << " cycles\n";
+    print_stats("modify-qty", samples, ns);
 }
 
-void bench_cancel() {
-    OrderBook ob(90, 110, 2'000'000);
+// ---------------------------------------------------------------------------
+void bench_cancel(double ns) {
+    // Insert 2*N orders; warmup by cancelling the second half, then
+    // measure cancelling the first half.
+    OrderBook ob(90, 110, 2 * N + WARMUP + 10);
 
-    // preload orders
-    for (int i = 0; i < 1'000'000; ++i) {
-        ob.applyUpdate({0, UpdateType::Add, (uint64_t)i, 100 + (i % 10), 10, OrderSide::Bid});
-    }
+    for (size_t i = 0; i < 2 * N; ++i)
+        ob.applyUpdate({0, UpdateType::Add, (uint64_t)i,
+                        100 + (int64_t)(i % 10), 10, OrderSide::Bid});
 
-    std::vector<uint64_t> samples;
-    samples.reserve(1'000'000);
+    // warmup: cancel orders [N .. N+WARMUP)
+    for (size_t i = N; i < N + WARMUP; ++i)
+        ob.applyUpdate({0, UpdateType::Cancel, (uint64_t)i, 0, 0, OrderSide::Bid});
 
-    for (int i = 0; i < 1'000'000; ++i) {
+    // measure: cancel orders [0 .. N)
+    std::vector<uint64_t> samples(N);
+    for (size_t i = 0; i < N; ++i) {
         MarketUpdate u{0, UpdateType::Cancel, (uint64_t)i, 0, 0, OrderSide::Bid};
-
-        uint64_t t0 = rdtsc();
+        uint64_t t0 = __rdtsc();
         ob.applyUpdate(u);
-        uint64_t t1 = rdtsc();
-
-        samples.push_back(t1 - t0);
+        uint64_t t1 = __rdtsc();
+        samples[i] = t1 - t0;
     }
-
-    std::sort(samples.begin(), samples.end());
-
-    std::cout << "Cancel P50: " << samples[samples.size()*0.50] << " cycles\n";
-    std::cout << "Cancel P95: " << samples[samples.size()*0.95] << " cycles\n";
-    std::cout << "Cancel P99: " << samples[samples.size()*0.99] << " cycles\n";
+    print_stats("cancel", samples, ns);
 }
 
+// ---------------------------------------------------------------------------
 int main() {
-    bench_best_price();
-    bench_insert();
-    bench_modify_qty();
-    bench_modify_price();
-    bench_cancel();
+    printf("Calibrating TSC... ");
+    fflush(stdout);
+    double ns = calibrate_ns_per_cycle();
+    printf("%.3f ns/cycle  (%.2f GHz)\n\n", ns, 1.0 / ns);
+
+    printf("%-18s  %-20s  %-21s  %-21s  %s\n",
+           "benchmark", "p50", "p99", "p99.9", "max");
+    printf("%-18s  %-20s  %-21s  %-21s  %s\n",
+           "---------", "---", "---", "-----", "---");
+
+    bench_best_price(ns);
+    bench_insert(ns);
+    bench_modify_qty(ns);
+    bench_cancel(ns);
+
     return 0;
 }
-
