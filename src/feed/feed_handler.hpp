@@ -19,5 +19,5 @@ public:
     void onBatch(It begin, It end);
 
 private:
-    MdQueue& _queue;
+    MdQueue& queue_;
 };

@@ -5,43 +5,43 @@
 OrderBook::OrderBook(int64_t min_price,
                      int64_t max_price,
                      size_t  max_orders)
-    : _min_price(min_price),
-      _max_price(max_price),
-      _max_orders(max_orders),
-      _best_bid_price(min_price),
-      _best_ask_price(max_price)
+    : min_price_(min_price),
+      max_price_(max_price),
+      max_orders_(max_orders),
+      best_bid_price_(min_price),
+      best_ask_price_(max_price)
 {
-    _id_to_index.resize(_max_orders, OrderNode::INVALID_INDEX);
+    id_to_index_.resize(max_orders_, OrderNode::INVALID_INDEX);
 
-    _num_levels = static_cast<size_t>(_max_price - _min_price + 1);
+    num_levels_ = static_cast<size_t>(max_price_ - min_price_ + 1);
 
     // allocate price levels
-    _bids = new PriceLevel[_num_levels];
-    _asks = new PriceLevel[_num_levels];
+    bids_ = new PriceLevel[num_levels_];
+    asks_ = new PriceLevel[num_levels_];
 
     // allocate nodes
-    _nodes = new OrderNode[_max_orders];
+    nodes_ = new OrderNode[max_orders_];
     // initialize free list
-    _free_head = 0;
-    for (size_t i = 0; i < _max_orders; ++i) {
-        _nodes[i].next = (i + 1 < _max_orders) ? i + 1 : OrderNode::INVALID_INDEX;
+    free_head_ = 0;
+    for (size_t i = 0; i < max_orders_; ++i) {
+        nodes_[i].next = (i + 1 < max_orders_) ? i + 1 : OrderNode::INVALID_INDEX;
     }
 }
 
 uint32_t OrderBook::allocNode() {
-    if (_free_head == OrderNode::INVALID_INDEX) {
+    if (free_head_ == OrderNode::INVALID_INDEX) {
         // out of memory 
         return OrderNode::INVALID_INDEX;
     }
 
-    uint32_t idx = _free_head;
-    _free_head = _nodes[idx].next;   // move head to next free node
+    uint32_t idx = free_head_;
+    free_head_ = nodes_[idx].next;   // move head to next free node
     return idx;
 }
 
 void OrderBook::freeNode(uint32_t idx) {
-    _nodes[idx].next = _free_head;   // push this node onto the free list
-    _free_head = idx;
+    nodes_[idx].next = free_head_;   // push this node onto the free list
+    free_head_ = idx;
 }
 
 void OrderBook::insertOrder(const MarketUpdate& u) {
@@ -50,7 +50,7 @@ void OrderBook::insertOrder(const MarketUpdate& u) {
     if (idx == OrderNode::INVALID_INDEX) return;
 
     // 2. fill node fields
-    OrderNode& node = _nodes[idx];
+    OrderNode& node = nodes_[idx];
     node.order_id = u.order_id;
     node.price    = u.price;
     node.qty      = u.qty;
@@ -58,9 +58,9 @@ void OrderBook::insertOrder(const MarketUpdate& u) {
     node.next     = OrderNode::INVALID_INDEX;
 
     // 3. map price → level index
-    size_t level_idx = static_cast<size_t>(u.price - _min_price);
+    size_t level_idx = static_cast<size_t>(u.price - min_price_);
 
-    PriceLevel* levels = (u.side == OrderSide::Bid) ? _bids : _asks;
+    PriceLevel* levels = (u.side == OrderSide::Bid) ? bids_ : asks_;
     PriceLevel& level  = levels[level_idx];
 
     // 4. insert into price level (FIFO)
@@ -71,7 +71,7 @@ void OrderBook::insertOrder(const MarketUpdate& u) {
         level.price = u.price;
     } else {
         // append to tail
-        _nodes[level.tail].next = idx;
+        nodes_[level.tail].next = idx;
         level.tail = idx;
     }
 
@@ -80,33 +80,33 @@ void OrderBook::insertOrder(const MarketUpdate& u) {
 
     // 6. update best bid/ask
     if (u.side == OrderSide::Bid) {
-        if (u.price > _best_bid_price) {
-            _best_bid_price = u.price;
+        if (u.price > best_bid_price_) {
+            best_bid_price_ = u.price;
         }
     } else {
-        if (u.price < _best_ask_price) {
-            _best_ask_price = u.price;
+        if (u.price < best_ask_price_) {
+            best_ask_price_ = u.price;
         }
     }
 
     // 7. store id → index mapping
-    _id_to_index[u.order_id] = idx;
+    id_to_index_[u.order_id] = idx;
 
 }
 
 void OrderBook::modifyOrder(const MarketUpdate& u) {
     // 1. find node
-    uint32_t idx = _id_to_index[u.order_id];
+    uint32_t idx = id_to_index_[u.order_id];
     if (idx == OrderNode::INVALID_INDEX) return;
 
-    OrderNode& node = _nodes[idx];
+    OrderNode& node = nodes_[idx];
     // 2. quantity-only modify
     if (u.price == node.price) {
         int32_t delta = u.qty - node.qty;
         node.qty = u.qty;
 
-        size_t level_idx = static_cast<size_t>(node.price - _min_price);
-        PriceLevel* levels = (node.side == OrderSide::Bid) ? _bids : _asks;
+        size_t level_idx = static_cast<size_t>(node.price - min_price_);
+        PriceLevel* levels = (node.side == OrderSide::Bid) ? bids_ : asks_;
         PriceLevel& level = levels[level_idx];
 
         level.total_qty += delta;
@@ -114,8 +114,8 @@ void OrderBook::modifyOrder(const MarketUpdate& u) {
     }
 
     // 3. price change: remove from old level
-    size_t old_idx = static_cast<size_t>(node.price - _min_price);
-    PriceLevel* old_levels = (node.side == OrderSide::Bid) ? _bids : _asks;
+    size_t old_idx = static_cast<size_t>(node.price - min_price_);
+    PriceLevel* old_levels = (node.side == OrderSide::Bid) ? bids_ : asks_;
     PriceLevel& old_level = old_levels[old_idx];
 
     uint32_t prev = OrderNode::INVALID_INDEX;
@@ -124,7 +124,7 @@ void OrderBook::modifyOrder(const MarketUpdate& u) {
     while (cur != OrderNode::INVALID_INDEX) {
         if (cur == idx) break;
         prev = cur;
-        cur = _nodes[cur].next;
+        cur = nodes_[cur].next;
     }
 
     if (cur == OrderNode::INVALID_INDEX) return; // should not happen
@@ -132,9 +132,9 @@ void OrderBook::modifyOrder(const MarketUpdate& u) {
     // unlink
     if (prev == OrderNode::INVALID_INDEX) {
         // removing head
-        old_level.head = _nodes[cur].next;
+        old_level.head = nodes_[cur].next;
     } else {
-        _nodes[prev].next = _nodes[cur].next;
+        nodes_[prev].next = nodes_[cur].next;
     }
 
     if (old_level.tail == idx) {
@@ -144,23 +144,23 @@ void OrderBook::modifyOrder(const MarketUpdate& u) {
     old_level.total_qty -= node.qty;
 
     // 4. update best price if needed
-    if (node.side == OrderSide::Bid && node.price == _best_bid_price) {
+    if (node.side == OrderSide::Bid && node.price == best_bid_price_) {
         // scan downward to find next non-empty bid
-        for (int64_t p = _best_bid_price; p >= _min_price; --p) {
-            size_t li = static_cast<size_t>(p - _min_price);
-            if (_bids[li].head != OrderNode::INVALID_INDEX) {
-                _best_bid_price = p;
+        for (int64_t p = best_bid_price_; p >= min_price_; --p) {
+            size_t li = static_cast<size_t>(p - min_price_);
+            if (bids_[li].head != OrderNode::INVALID_INDEX) {
+                best_bid_price_ = p;
                 break;
             }
         }
     }
 
-    if (node.side == OrderSide::Ask && node.price == _best_ask_price) {
+    if (node.side == OrderSide::Ask && node.price == best_ask_price_) {
         // scan upward to find next non-empty ask
-        for (int64_t p = _best_ask_price; p <= _max_price; ++p) {
-            size_t li = static_cast<size_t>(p - _min_price);
-            if (_asks[li].head != OrderNode::INVALID_INDEX) {
-                _best_ask_price = p;
+        for (int64_t p = best_ask_price_; p <= max_price_; ++p) {
+            size_t li = static_cast<size_t>(p - min_price_);
+            if (asks_[li].head != OrderNode::INVALID_INDEX) {
+                best_ask_price_ = p;
                 break;
             }
         }
@@ -172,38 +172,38 @@ void OrderBook::modifyOrder(const MarketUpdate& u) {
     node.next  = OrderNode::INVALID_INDEX;
 
     // 6. insert into new price level
-    size_t new_idx = static_cast<size_t>(u.price - _min_price);
-    PriceLevel* new_levels = (node.side == OrderSide::Bid) ? _bids : _asks;
+    size_t new_idx = static_cast<size_t>(u.price - min_price_);
+    PriceLevel* new_levels = (node.side == OrderSide::Bid) ? bids_ : asks_;
     PriceLevel& new_level = new_levels[new_idx];
 
     if (new_level.head == OrderNode::INVALID_INDEX) {
         new_level.head = idx;
         new_level.tail = idx;
     } else {
-        _nodes[new_level.tail].next = idx;
+        nodes_[new_level.tail].next = idx;
         new_level.tail = idx;
     }
 
     new_level.total_qty += node.qty;
 
     // 7. update best price for new level
-    if (node.side == OrderSide::Bid && u.price > _best_bid_price) {
-        _best_bid_price = u.price;
+    if (node.side == OrderSide::Bid && u.price > best_bid_price_) {
+        best_bid_price_ = u.price;
     }
-    if (node.side == OrderSide::Ask && u.price < _best_ask_price) {
-        _best_ask_price = u.price;
+    if (node.side == OrderSide::Ask && u.price < best_ask_price_) {
+        best_ask_price_ = u.price;
     }
 }
 
 void OrderBook::cancelOrder(const MarketUpdate& u) {
     // 1. find node
-    uint32_t idx = _id_to_index[u.order_id];
+    uint32_t idx = id_to_index_[u.order_id];
     if (idx == OrderNode::INVALID_INDEX) return;
 
-    OrderNode& node = _nodes[idx];
+    OrderNode& node = nodes_[idx];
     // 2. find price level
-    size_t level_idx = static_cast<size_t>(node.price - _min_price);
-    PriceLevel* levels = (node.side == OrderSide::Bid) ? _bids : _asks;
+    size_t level_idx = static_cast<size_t>(node.price - min_price_);
+    PriceLevel* levels = (node.side == OrderSide::Bid) ? bids_ : asks_;
     PriceLevel& level = levels[level_idx];
 
     // 3. unlink node from list
@@ -213,16 +213,16 @@ void OrderBook::cancelOrder(const MarketUpdate& u) {
     while (cur != OrderNode::INVALID_INDEX) {
         if (cur == idx) break;
         prev = cur;
-        cur = _nodes[cur].next;
+        cur = nodes_[cur].next;
     }
 
     if (cur == OrderNode::INVALID_INDEX) return; // should not happen
 
     if (prev == OrderNode::INVALID_INDEX) {
         // removing head
-        level.head = _nodes[cur].next;
+        level.head = nodes_[cur].next;
     } else {
-        _nodes[prev].next = _nodes[cur].next;
+        nodes_[prev].next = nodes_[cur].next;
     }
 
     if (level.tail == idx) {
@@ -233,21 +233,21 @@ void OrderBook::cancelOrder(const MarketUpdate& u) {
     level.total_qty -= node.qty;
 
     // 5. update best price if needed
-    if (node.side == OrderSide::Bid && node.price == _best_bid_price) {
-        for (int64_t p = _best_bid_price; p >= _min_price; --p) {
-            size_t li = static_cast<size_t>(p - _min_price);
-            if (_bids[li].head != OrderNode::INVALID_INDEX) {
-                _best_bid_price = p;
+    if (node.side == OrderSide::Bid && node.price == best_bid_price_) {
+        for (int64_t p = best_bid_price_; p >= min_price_; --p) {
+            size_t li = static_cast<size_t>(p - min_price_);
+            if (bids_[li].head != OrderNode::INVALID_INDEX) {
+                best_bid_price_ = p;
                 break;
             }
         }
     }
 
-    if (node.side == OrderSide::Ask && node.price == _best_ask_price) {
-        for (int64_t p = _best_ask_price; p <= _max_price; ++p) {
-            size_t li = static_cast<size_t>(p - _min_price);
-            if (_asks[li].head != OrderNode::INVALID_INDEX) {
-                _best_ask_price = p;
+    if (node.side == OrderSide::Ask && node.price == best_ask_price_) {
+        for (int64_t p = best_ask_price_; p <= max_price_; ++p) {
+            size_t li = static_cast<size_t>(p - min_price_);
+            if (asks_[li].head != OrderNode::INVALID_INDEX) {
+                best_ask_price_ = p;
                 break;
             }
         }
@@ -257,16 +257,16 @@ void OrderBook::cancelOrder(const MarketUpdate& u) {
     freeNode(idx);
 
     // 7. remove id → index mapping
-    _id_to_index[u.order_id] = OrderNode::INVALID_INDEX;
+    id_to_index_[u.order_id] = OrderNode::INVALID_INDEX;
 }
 
 void OrderBook::applyUpdate(const MarketUpdate& u) {
-    if (u.price < _min_price || u.price > _max_price) {
+    if (u.price < min_price_ || u.price > max_price_) {
         // Ignore out-of-range prices for this simple benchmark
         return;
     }
 
-    if (u.order_id >= _max_orders) {
+    if (u.order_id >= max_orders_) {
         // Ignore absurd order_id for now
         return;
     }
@@ -281,14 +281,14 @@ void OrderBook::applyUpdate(const MarketUpdate& u) {
 
 bool OrderBook::getBestBid(PriceLevel& out) const {
     // If there is no meaningful best bid, early exit
-    if (_best_bid_price < _min_price) {
+    if (best_bid_price_ < min_price_) {
         return false;
     }
 
-    int64_t p = _best_bid_price;
-    while (p >= _min_price) {
-        size_t idx = static_cast<size_t>(p - _min_price);
-        const PriceLevel& lvl = _bids[idx];
+    int64_t p = best_bid_price_;
+    while (p >= min_price_) {
+        size_t idx = static_cast<size_t>(p - min_price_);
+        const PriceLevel& lvl = bids_[idx];
 
         if (lvl.head != OrderNode::INVALID_INDEX) {
             out = lvl;           // copy level
@@ -303,14 +303,14 @@ bool OrderBook::getBestBid(PriceLevel& out) const {
 
 bool OrderBook::getBestAsk(PriceLevel& out) const {
     // If there is no meaningful best ask, early exit
-    if (_best_ask_price > _max_price) {
+    if (best_ask_price_ > max_price_) {
         return false;
     }
 
-    int64_t p = _best_ask_price;
-    while (p <= _max_price) {
-        size_t idx = static_cast<size_t>(p - _min_price);
-        const PriceLevel& lvl = _asks[idx];
+    int64_t p = best_ask_price_;
+    while (p <= max_price_) {
+        size_t idx = static_cast<size_t>(p - min_price_);
+        const PriceLevel& lvl = asks_[idx];
 
         if (lvl.head != OrderNode::INVALID_INDEX) {
             out = lvl;           // copy level

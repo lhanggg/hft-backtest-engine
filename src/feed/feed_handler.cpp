@@ -2,12 +2,12 @@
 #include <iostream>
 
 FeedHandler::FeedHandler(MdQueue& q)
-    : _queue(q) {
+    : queue_(q) {
 }
 
 bool FeedHandler::onUpdate(const MarketUpdate& u) {
     //std::cout << "FeedHandler pushing update\n";
-    return _queue.push(u);
+    return queue_.push(u);
 }
 
 template <typename It>
@@ -15,7 +15,7 @@ void FeedHandler::onBatch(It begin, It end) {
     for (auto it = begin; it != end; ++it) {
         const MarketUpdate& u = *it;
         // For now: spin until pushed. Later we can tune this policy.
-        while (!_queue.push(u)) {
+        while (!queue_.push(u)) {
             // busy-wait; or backoff/yield if needed
         }
     }
