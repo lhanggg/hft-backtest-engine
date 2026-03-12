@@ -56,6 +56,7 @@ void OrderBook::insertOrder(const MarketUpdate& u) {
     node.qty      = u.qty;
     node.side     = u.side;
     node.next     = OrderNode::INVALID_INDEX;
+    node.prev     = OrderNode::INVALID_INDEX;
 
     // 3. map price → level index
     size_t level_idx = static_cast<size_t>(u.price - min_price_);
@@ -71,6 +72,7 @@ void OrderBook::insertOrder(const MarketUpdate& u) {
         level.price = u.price;
     } else {
         // append to tail
+        node.prev = level.tail;
         nodes_[level.tail].next = idx;
         level.tail = idx;
     }
@@ -113,32 +115,18 @@ void OrderBook::modifyOrder(const MarketUpdate& u) {
         return;
     }
 
-    // 3. price change: remove from old level
+    // 3. price change: remove from old level (O(1) via prev/next)
     size_t old_idx = static_cast<size_t>(node.price - min_price_);
     PriceLevel* old_levels = (node.side == OrderSide::Bid) ? bids_ : asks_;
     PriceLevel& old_level = old_levels[old_idx];
 
-    uint32_t prev = OrderNode::INVALID_INDEX;
-    uint32_t cur = old_level.head;
-
-    while (cur != OrderNode::INVALID_INDEX) {
-        if (cur == idx) break;
-        prev = cur;
-        cur = nodes_[cur].next;
-    }
-
-    if (cur == OrderNode::INVALID_INDEX) return; // should not happen
-
-    // unlink
-    if (prev == OrderNode::INVALID_INDEX) {
-        // removing head
-        old_level.head = nodes_[cur].next;
-    } else {
-        nodes_[prev].next = nodes_[cur].next;
-    }
-
-    if (old_level.tail == idx) {
-        old_level.tail = prev;
+    {
+        uint32_t p = node.prev;
+        uint32_t n = node.next;
+        if (p == OrderNode::INVALID_INDEX) old_level.head = n;
+        else                               nodes_[p].next = n;
+        if (n == OrderNode::INVALID_INDEX) old_level.tail = p;
+        else                               nodes_[n].prev = p;
     }
 
     old_level.total_qty -= node.qty;
@@ -170,6 +158,7 @@ void OrderBook::modifyOrder(const MarketUpdate& u) {
     node.price = u.price;
     node.qty   = u.qty;
     node.next  = OrderNode::INVALID_INDEX;
+    node.prev  = OrderNode::INVALID_INDEX;
 
     // 6. insert into new price level
     size_t new_idx = static_cast<size_t>(u.price - min_price_);
@@ -180,6 +169,7 @@ void OrderBook::modifyOrder(const MarketUpdate& u) {
         new_level.head = idx;
         new_level.tail = idx;
     } else {
+        node.prev = new_level.tail;
         nodes_[new_level.tail].next = idx;
         new_level.tail = idx;
     }
@@ -206,27 +196,14 @@ void OrderBook::cancelOrder(const MarketUpdate& u) {
     PriceLevel* levels = (node.side == OrderSide::Bid) ? bids_ : asks_;
     PriceLevel& level = levels[level_idx];
 
-    // 3. unlink node from list
-    uint32_t prev = OrderNode::INVALID_INDEX;
-    uint32_t cur = level.head;
-
-    while (cur != OrderNode::INVALID_INDEX) {
-        if (cur == idx) break;
-        prev = cur;
-        cur = nodes_[cur].next;
-    }
-
-    if (cur == OrderNode::INVALID_INDEX) return; // should not happen
-
-    if (prev == OrderNode::INVALID_INDEX) {
-        // removing head
-        level.head = nodes_[cur].next;
-    } else {
-        nodes_[prev].next = nodes_[cur].next;
-    }
-
-    if (level.tail == idx) {
-        level.tail = prev;
+    // 3. unlink node from list (O(1) via prev/next)
+    {
+        uint32_t p = node.prev;
+        uint32_t n = node.next;
+        if (p == OrderNode::INVALID_INDEX) level.head = n;
+        else                               nodes_[p].next = n;
+        if (n == OrderNode::INVALID_INDEX) level.tail = p;
+        else                               nodes_[n].prev = p;
     }
 
     // 4. update total quantity

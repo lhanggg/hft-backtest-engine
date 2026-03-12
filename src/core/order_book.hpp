@@ -11,8 +11,9 @@ struct alignas(64) OrderNode {
   int64_t  price;      // price in ticks
   int32_t  qty;        // remaining quantity
   uint32_t next;       // index of next node in list, or INVALID_INDEX
+  uint32_t prev;       // index of prev node in list, or INVALID_INDEX
   OrderSide side;      // bid or ask
-  uint8_t  _pad[39];    // padding to keep struct 64 bytes and aligned
+  uint8_t  _pad[35];   // padding to keep struct 64 bytes and aligned
 
   static constexpr uint32_t INVALID_INDEX =
       std::numeric_limits<uint32_t>::max();
