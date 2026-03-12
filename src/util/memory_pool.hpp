@@ -53,6 +53,7 @@ public:
     {
         if(base_)
         {
+            free(base_);
             base_ = nullptr;
             free_head_.store(nullptr, std::memory_order_relaxed);
             count_ = 0;
