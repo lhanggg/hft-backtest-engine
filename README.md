@@ -9,9 +9,10 @@ A lightweight, allocation-free backtesting / replay engine developed on Windows 
    ```
    (See [`src/tools/generate_feed.cpp`](src/tools/generate_feed.cpp))
 
-2. Replay feed via memory-map and handler:
+2. Replay feed via memory-map and handler (concurrent producer/consumer with thread affinity):
    ```sh
-   build/feed_throughput.exe feed.bin
+   build/feed_throughput.exe feed.bin                  # no affinity — OS schedules
+   build/feed_throughput.exe feed.bin 4 5              # pin to specific cores (HT pair = fastest)
    ```
    Replay implementation: [`run_mmap_replay`](src/replay/mmap_replay.cpp) which calls [`BinaryParser::parse`](src/feed/binary_parser.cpp).
 
@@ -53,6 +54,22 @@ cancel            16.4 ns    26.8 ns    43.2 ns    166420.5 ns
 
 `OrderNode` uses a doubly-linked list (`prev` + `next` indices) for O(1) unlink on cancel/modify.
 Max values reflect OS scheduler jitter; the hot-path numbers are p50/p99/p99.9.
+
+### SPSC feed throughput (concurrent producer + consumer, 1M msgs, i7-12700H, Windows)
+
+```
+cores (producer, consumer)   type                         throughput
+--------------------------   ----                         ----------
+4, 5                         HT pair (same physical core) 17.6 M msgs/sec  ← best
+4, 6                         separate physical P-cores    7.9 M msgs/sec
+none (OS schedules)          unpinned                     4.4 M msgs/sec   ← worst
+```
+
+**Key finding:** pinning producer and consumer to the same physical core's hyperthreads (cores 4/5)
+is **4x faster** than unpinned and **2x faster** than separate physical cores.
+The ring buffer fits in shared L1/L2 cache — no coherency traffic needed between cores.
+Unpinned threads are migrated by the OS mid-run, causing random cache misses and context switches.
+Run `feed_throughput.exe feed.bin <producer_core> <consumer_core>` to reproduce.
 
 ## Notes & tips
 - Project targets MinGW; toolchain detected in build artifacts (see `build/` and `build/compile_commands.json`).
