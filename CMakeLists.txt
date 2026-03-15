@@ -37,6 +37,7 @@ add_library(trading_core
     src/engine/event_loop.hpp
     src/engine/strategy_interface.hpp
     src/engine/strategy_example.cpp
+    src/engine/imbalance_strategy.hpp
 
     # util (header-only)
     src/util/memory_pool.hpp
@@ -69,6 +70,11 @@ add_executable(generate_feed
     src/tools/generate_feed.cpp
 )
 target_link_libraries(generate_feed PRIVATE trading_core)
+
+add_executable(run_backtest
+    src/tools/run_backtest.cpp
+)
+target_link_libraries(run_backtest PRIVATE trading_core)
 
 # ----------------------------------------------------------------------
 # tests

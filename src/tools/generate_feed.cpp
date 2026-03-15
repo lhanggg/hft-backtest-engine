@@ -1,23 +1,11 @@
+#include "core/market_data.hpp"
+
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <chrono>
-
-// 32‑byte feed record
-#pragma pack(push, 1)
-struct FeedRecord {
-    uint64_t ts;
-    uint32_t  type;
-    uint32_t  side;
-    uint64_t order_id;
-    int64_t  price;
-    int64_t  qty;
-    uint32_t _pad = 0; // padding to reach 48 bytes
-    uint32_t _pad2 = 0;
-};
-#pragma pack(pop)
 
 int main(int argc, char** argv) {
     if (argc < 3) {
@@ -41,15 +29,16 @@ int main(int argc, char** argv) {
     std::uniform_int_distribution<int> qty_dist(1, 100);
 
     for (uint64_t i = 0; i < num; ++i) {
-        FeedRecord rec{};
-        rec.ts = std::chrono::steady_clock::now().time_since_epoch().count();
-        rec.type = static_cast<uint8_t>(type_dist(rng));
-        rec.side = static_cast<uint8_t>(side_dist(rng));
-        rec.order_id = i + 1;
-        rec.price = 10000 + price_dist(rng);
-        rec.qty = qty_dist(rng);
+        MarketUpdate mu{};
+        mu.ts       = static_cast<uint64_t>(
+                          std::chrono::steady_clock::now().time_since_epoch().count());
+        mu.type     = static_cast<UpdateType>(type_dist(rng));
+        mu.side     = static_cast<OrderSide>(side_dist(rng));
+        mu.order_id = i + 1;
+        mu.price    = 10000 + price_dist(rng);
+        mu.qty      = qty_dist(rng);
 
-        out.write(reinterpret_cast<const char*>(&rec), sizeof(rec));
+        out.write(reinterpret_cast<const char*>(&mu), sizeof(mu));
     }
 
     std::cout << "Generated " << num << " messages into " << filename << "\n";

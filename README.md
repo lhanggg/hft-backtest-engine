@@ -28,6 +28,13 @@ A lightweight, allocation-free backtesting / replay engine developed on Windows 
    ```
    See [`benchmarks/bench_order_book.cpp`](benchmarks/bench_order_book.cpp).
 
+5. Run the imbalance strategy backtest:
+   ```sh
+   build/run_backtest.exe feed.bin              # defaults: alpha=0.1, threshold=0.3
+   build/run_backtest.exe feed.bin 0.1 0.05     # lower threshold → more signals
+   ```
+   See [`src/tools/run_backtest.cpp`](src/tools/run_backtest.cpp) and [`src/engine/imbalance_strategy.hpp`](src/engine/imbalance_strategy.hpp).
+
 ## Key components
 - Build configuration: [CMakeLists.txt](CMakeLists.txt)
 - Replay / mmap ingest: [src/replay/mmap_replay.cpp](src/replay/mmap_replay.cpp) — `run_mmap_replay`
@@ -38,6 +45,8 @@ A lightweight, allocation-free backtesting / replay engine developed on Windows 
 - Example strategy: [src/engine/strategy_example.cpp](src/engine/strategy_example.cpp) — `DummyStrategy`
 - Order book microbench: [benchmarks/bench_order_book.cpp](benchmarks/bench_order_book.cpp)
 - Feed throughput bench: [benchmarks/feed_throughput.cpp](benchmarks/feed_throughput.cpp)
+- Imbalance strategy: [src/engine/imbalance_strategy.hpp](src/engine/imbalance_strategy.hpp) — EMA-based order book imbalance signal with PnL tracking
+- Backtest runner: [src/tools/run_backtest.cpp](src/tools/run_backtest.cpp)
 
 ## Benchmarks
 
@@ -70,6 +79,22 @@ is **4x faster** than unpinned and **2x faster** than separate physical cores.
 The ring buffer fits in shared L1/L2 cache — no coherency traffic needed between cores.
 Unpinned threads are migrated by the OS mid-run, causing random cache misses and context switches.
 Run `feed_throughput.exe feed.bin <producer_core> <consumer_core>` to reproduce.
+
+### Backtest results (ImbalanceStrategy, 1M msgs, i7-12700H, Windows)
+
+```
+feed        : 1 000 000 random orders, prices 10000 ± 50
+throughput  : ~29 M updates/sec (single-threaded event loop)
+```
+
+| alpha | threshold | signals | round trips | realized PnL (ticks) |
+|-------|-----------|---------|-------------|----------------------|
+| 0.1   | 0.30      | 2       | 1           | 97                   |
+| 0.1   | 0.05      | 5       | 4           | 283                  |
+
+Signal: order-book imbalance EMA crosses ±threshold → market order at best ask/bid.
+PnL is in price ticks (mark-to-market); random feed so values are noise by design.
+Run `run_backtest.exe feed.bin <alpha> <threshold>` to reproduce.
 
 ## Notes & tips
 - Project targets MinGW; toolchain detected in build artifacts (see `build/` and `build/compile_commands.json`).
