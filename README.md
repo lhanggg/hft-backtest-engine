@@ -1,6 +1,8 @@
-# Trading System — README
+# HFT Backtesting Engine
 
 A lightweight, allocation-free backtesting / replay engine developed on Windows (MinGW/CMake).
+
+Key results: **16 ns p50 order-book insert** (TSC-measured, 1M samples); SPSC throughput **4x higher** when producer/consumer share L1/L2 cache (HT pair vs unpinned).
 
 ## Typical workflow
 1. Generate a feed file:
@@ -61,7 +63,7 @@ modify-qty        14.1 ns    18.6 ns    32.0 ns    178076.7 ns
 cancel            16.4 ns    26.8 ns    43.2 ns    166420.5 ns
 ```
 
-`OrderNode` uses a doubly-linked list (`prev` + `next` indices) for O(1) unlink on cancel/modify.
+`OrderNode` uses a doubly-linked list (`prev` + `next`) for O(1) unlink on cancel/modify.
 Max values reflect OS scheduler jitter; the hot-path numbers are p50/p99/p99.9.
 
 ### SPSC feed throughput (concurrent producer + consumer, 1M msgs, i7-12700H, Windows)
@@ -99,4 +101,4 @@ Run `run_backtest.exe feed.bin <alpha> <threshold>` to reproduce.
 ## Notes & tips
 - Project targets MinGW; toolchain detected in build artifacts (see `build/` and `build/compile_commands.json`).
 - Binaries produced in `build/` (examples: `generate_feed.exe`, `feed_throughput.exe`, `bench_order_book.exe`).
-- Design goals: allocation-free hot path, SPSC rings for handoff, mmap replay for zero-copy parsing (see `design.md`).
+- Design goals: allocation-free hot path, SPSC rings for handoff, mmap replay for zero-copy parsing.
