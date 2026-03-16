@@ -1,10 +1,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <new>
-#include <cassert>
-#include <atomic>
-#include <memory>
 #include <algorithm>
 
 class FixedPool{
@@ -28,25 +24,23 @@ public:
             void* next = (i + 1 < n) ? (p + (i + 1) * elemSize_) : nullptr;
             *slot = next;
         }
-        free_head_.store(base_, std::memory_order_relaxed);
+        free_head_ = base_;
     }
 
     void* allocate()
     {
         // pop a node from the free list
-        void* head = free_head_.load(std::memory_order_relaxed);
-        if(!head) return nullptr;
-        void* next = *(reinterpret_cast<void**>(head));
-        free_head_.store(next, std::memory_order_relaxed);
+        if (!free_head_) return nullptr;
+        void* head = free_head_;
+        free_head_ = *reinterpret_cast<void**>(head);
         return head;
     }
 
     void deallocate(void* p)
     {
         // push the node back to the free list
-        void* old = free_head_.load(std::memory_order_relaxed);
-        *(reinterpret_cast<void**>(p)) = old;
-        free_head_.store(p, std::memory_order_relaxed);
+        *reinterpret_cast<void**>(p) = free_head_;
+        free_head_ = p;
     }
 
     void release()
@@ -55,7 +49,7 @@ public:
         {
             free(base_);
             base_ = nullptr;
-            free_head_.store(nullptr, std::memory_order_relaxed);
+            free_head_ = nullptr;
             count_ = 0;
         }
     }
@@ -63,5 +57,5 @@ private:
     size_t elemSize_;
     size_t count_{0};
     uint8_t* base_{nullptr};
-    std::atomic<void*> free_head_{nullptr};
+    void* free_head_{nullptr};
 };

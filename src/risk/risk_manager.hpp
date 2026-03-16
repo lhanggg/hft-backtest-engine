@@ -5,8 +5,7 @@
 
 #include "engine/strategy_interface.hpp"
 
-// Minimal risk manager: pure stateless checks for Week 7.
-// You can extend this later with position tracking, per-symbol limits, etc.
+// Stateless pre-trade risk checks: price and quantity bounds.
 class RiskManager {
 public:
     RiskManager(std::int64_t max_abs_price, std::int64_t max_abs_qty)
