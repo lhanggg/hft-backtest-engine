@@ -32,7 +32,7 @@ Key components:
 ## Data Layouts
 
 ### Feed record
-32-byte packed record written by [`src/tools/generate_feed.cpp`](src/tools/generate_feed.cpp); replayed zero-copy via mmap in [`src/replay/mmap_replay.cpp`](src/replay/mmap_replay.cpp).
+`MarketUpdate` POD (40 bytes) written by [`src/tools/generate_feed.cpp`](src/tools/generate_feed.cpp); replayed zero-copy via mmap in [`src/replay/mmap_replay.cpp`](src/replay/mmap_replay.cpp).
 
 ### MarketUpdate
 Small POD passed through the SPSC ring — see [`src/core/market_data.hpp`](src/core/market_data.hpp).
@@ -109,8 +109,7 @@ build/bench_order_book.exe
 ```
 
 ## Open Considerations
-- `FixedPool` in [`src/util/memory_pool.hpp`](src/util/memory_pool.hpp) is currently unused (dead code). Candidate for removal or future use as a slab allocator for strategy objects.
+- `FixedPool` in [`src/util/memory_pool.hpp`](src/util/memory_pool.hpp) is not yet wired into `OrderBook`; future candidate for hot-path node allocation.
 - Resolve strategy output model: `DummyStrategy` demonstrates both `out_queue_.push` and `poll_signal`; pick one and remove the other.
 - `RiskManager` interface: standardize method name (`check` vs `checkAndApply`).
 - Port to Linux: swap `MapViewOfFile` → `mmap`, `SetThreadAffinityMask` → `sched_setaffinity`, add hugepage support (`MAP_HUGETLB`).
-- Add a non-trivial strategy signal (e.g., EMA mid-price or order-book imbalance ratio).
