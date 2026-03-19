@@ -45,35 +45,24 @@ public:
     OrderBook(OrderBook&&)                 = delete;
     OrderBook& operator=(OrderBook&&)      = delete;
 
-    // main entry point
     void applyUpdate(const MarketUpdate& u);
 
-    // queries
     [[nodiscard]] bool getBestBid(PriceLevel& out) const;
     [[nodiscard]] bool getBestAsk(PriceLevel& out) const;
 
 private:
-    // configuration
     int64_t min_price_;
     int64_t max_price_;
     size_t  num_levels_;
     size_t  max_orders_;
-    // price levels
     PriceLevel* bids_;
     PriceLevel* asks_;
-
-    // order nodes
     OrderNode* nodes_;
-
-    // free list for nodes
     uint32_t free_head_;
-
     std::vector<uint32_t> id_to_index_;
-    // best prices
     int64_t best_bid_price_;
     int64_t best_ask_price_;
 
-    // helpers (we will implement later)
     uint32_t allocNode();
     void     freeNode(uint32_t idx);
 

@@ -6,7 +6,6 @@ FeedHandler::FeedHandler(MdQueue& q)
 }
 
 bool FeedHandler::onUpdate(const MarketUpdate& u) {
-    //std::cout << "FeedHandler pushing update\n";
     return queue_.push(u);
 }
 
@@ -14,12 +13,6 @@ template <typename It>
 void FeedHandler::onBatch(It begin, It end) {
     for (auto it = begin; it != end; ++it) {
         const MarketUpdate& u = *it;
-        // For now: spin until pushed. Later we can tune this policy.
-        while (!queue_.push(u)) {
-            // busy-wait; or backoff/yield if needed
-        }
+        while (!queue_.push(u)) {}
     }
 }
-
-// If you keep this implementation in the .cpp, you need explicit instantiations
-// or move onBatch into the header. Easiest: move the function body into the header.

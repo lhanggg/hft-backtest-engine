@@ -69,7 +69,6 @@ std::uint64_t run_mmap_replay(FeedHandler& fh, const char* filename) {
 
 
         while (!fh.onUpdate(u)) {
-            // spin until queue has space
             std::cout << "FULL\n";
         }
 

@@ -66,7 +66,6 @@ public:
         return true;
     }
 
-    // destruct remaing items and reset head and tail
     void reset()
     {
         size_t head = head_.load(std::memory_order_relaxed);

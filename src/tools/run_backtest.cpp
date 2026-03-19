@@ -10,15 +10,6 @@
 #include "risk/risk_manager.hpp"
 #include "util/timer.hpp"
 
-// ---------------------------------------------------------------------------
-// run_backtest — drives the full pipeline with ImbalanceStrategy
-//
-// Usage:
-//   run_backtest <feed_file> [ema_alpha] [threshold]
-//
-//   ema_alpha  : EMA smoothing factor    (default 0.1,  range 0–1)
-//   threshold  : imbalance trigger level (default 0.3,  range 0–1)
-// ---------------------------------------------------------------------------
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Usage: run_backtest <feed_file> [ema_alpha] [threshold]\n";
@@ -46,7 +37,6 @@ int main(int argc, char** argv) {
     EventLoop           loop(md_queue, out_queue, ob, strategy, risk,
                              /*timer_interval_ns*/ UINT64_MAX);  // disable periodic timer
 
-    // Load feed into SPSC queue, then run engine
     std::uint64_t num_msgs = run_mmap_replay(fh, filename);
 
     const std::uint64_t t0 = get_monotonic_ns();
