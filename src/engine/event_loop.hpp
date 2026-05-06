@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include "engine/strategy_interface.hpp"
 #include "risk/risk_manager.hpp"
@@ -23,6 +24,7 @@ public:
               std::uint64_t timer_interval_ns);
 
     void run();
+    void run(const std::atomic<bool>& producer_done);
 
     std::uint64_t updates_processed() const noexcept {
         return updates_processed_;

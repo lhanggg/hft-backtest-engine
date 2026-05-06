@@ -37,6 +37,23 @@ void EventLoop::run() {
     }
 }
 
+void EventLoop::run(const std::atomic<bool>& producer_done) {
+    while (true) {
+        bool did_work = false;
+
+        did_work |= handle_market_data();
+        did_work |= handle_strategy_output();
+
+        const std::uint64_t now_ns = get_monotonic_ns();
+        maybe_fire_timer(now_ns);
+
+        // Only exit when producer has finished AND queue is drained
+        if (!did_work && producer_done.load(std::memory_order_acquire)) {
+            break;
+        }
+    }
+}
+
 bool EventLoop::handle_market_data() {
     bool did_work = false;
 

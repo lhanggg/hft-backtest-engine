@@ -85,9 +85,29 @@ Run `feed_throughput.exe feed.bin <producer_core> <consumer_core>` to reproduce.
 ### Backtest results (ImbalanceStrategy, 1M msgs, i7-12700H, Windows)
 
 ```
-feed        : 1 000 000 random orders, prices 10000 ± 50
-throughput  : ~29 M updates/sec (single-threaded event loop)
+feed : 1 000 000 random orders, prices 10000 ± 50
 ```
+
+| mode | elapsed | throughput | description |
+|------|---------|------------|-------------|
+| serial (pre-fill → drain) | 0.036 s | **27.8 M updates/sec** | replay fills entire queue first, then event loop drains it — no concurrent access |
+| true SPSC (concurrent threads) | 0.130 s | **7.7 M updates/sec** | producer and consumer run simultaneously on separate threads |
+
+**Why concurrent is 3.6× slower here:** in the serial mode the consumer reads from a cache-warm
+buffer with zero cross-thread contention. In concurrent mode, every cache line written by the
+producer is immediately invalidated on the consumer's core (MESI protocol), forcing a core-to-core
+transfer (~100–300 ns) on every slot — overwhelming the ~4 ns L1 hit cost.
+
+This is expected and not a bug. In production HFT the producer is a network feed parser (slow,
+bursty, driven by external I/O) and the consumer is a strategy loop (fast, CPU-bound). The SPSC
+ring acts as a decoupling buffer so the consumer never blocks on I/O, and both sides operate at
+their natural speed. When the two sides have similar, sustained throughput and share the same
+working set, concurrent SPSC adds coherence overhead without hiding any latency — exactly the
+backtest scenario.
+
+The `feed_throughput` benchmark above (HT-pair pinning: 17.6 M msgs/sec) shows SPSC performance
+when threads are co-located on the same physical core and share L1/L2 — coherence traffic drops
+to near zero and the ring buffer reaches peak throughput.
 
 | alpha | threshold | signals | round trips | realized PnL (ticks) |
 |-------|-----------|---------|-------------|----------------------|

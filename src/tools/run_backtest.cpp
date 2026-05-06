@@ -1,5 +1,7 @@
+#include <atomic>
 #include <iostream>
 #include <cstdlib>
+#include <thread>
 
 #include "core/order_book.hpp"
 #include "core/ring_buffer.hpp"
@@ -37,11 +39,21 @@ int main(int argc, char** argv) {
     EventLoop           loop(md_queue, out_queue, ob, strategy, risk,
                              /*timer_interval_ns*/ UINT64_MAX);  // disable periodic timer
 
-    std::uint64_t num_msgs = run_mmap_replay(fh, filename);
+    std::atomic<bool>  producer_done{false};
+    std::uint64_t      num_msgs = 0;
 
+    // Producer: replay feed into md_queue on a dedicated thread
+    std::thread producer([&] {
+        num_msgs = run_mmap_replay(fh, filename);
+        producer_done.store(true, std::memory_order_release);
+    });
+
+    // Consumer: event loop drains md_queue on the main thread
     const std::uint64_t t0 = get_monotonic_ns();
-    loop.run();
+    loop.run(producer_done);
     const std::uint64_t t1 = get_monotonic_ns();
+
+    producer.join();
 
     double elapsed = (t1 - t0) / 1e9;
 
